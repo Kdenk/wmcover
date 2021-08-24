@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# webMAN MOD cover creator & FTP uploader 1.2 by Kdenk
+# Copyleft - all rights reversed
+#
+# This script creates a cover to be used in webMAN Games for PS1, PS2, 
+# PS3, PSP or of custom size. A transparent border is applied to 
+# display a gap between covers in PS3 XMB when out of focus.
+#
+# Usage: ./wmcover [option]... [preset] [input] [output]
+#
+# 	options		-noftp (dont't upload cover to PS3)
+#				-ip [ip] (default value: 192.168.1.103)
+#
+#				-path [path] (no default)
+#				-size [<width>x<height>] (no default)
+#
+# 	presets		-ps1 (path=/dev_hdd0/PSXISO and size=180x180)
+#				-ps2 (path=/dev_hdd0/PS2ISO and size=130x180)
+#				-ps3 (path=/dev_hdd0/PS3ISO and size=156x180)
+#				-psp (path=/dev_hdd0/PSPISO and size=106x180)
+#
+# 	input		image file to convert (use quotes if there are spaces 
+#				in filename)
+# 	output		output cover filename without extension (defaults to 
+#				.png, ok spaces without quotes)
+#
+# If both an option and a preset are specified, the last inputted 
+# setting (positional) is applied.
+
+spath="$(dirname $0)" # script path
+
+noftp=false # by default enable ftp upload
+host='192.168.1.103'
+user=''
+pass=''
+path=''
+size=''
+
+# parse options
+for i in "$@"; do
+	case "$i" in
+		-noftp)
+			shift
+			noftp=true
+			;;
+		-ip)
+			shift
+			host="$1"
+			shift
+			;;
+		-path)
+			shift
+			path="$1"
+			shift
+			;;
+		-size)
+			shift
+			size="$1"
+			shift
+			;;
+		-ps1) # PS1 preset
+			shift
+			path='dev_hdd0/PSXISO'
+			size='180x180'
+			;;
+		-ps2) # PS2 preset
+			shift
+			path='dev_hdd0/PS2ISO'
+			size='130x180'
+			;;
+		-ps3) # PS3 preset
+			shift
+			path='dev_hdd0/PS3ISO'
+			size='156x180'
+			;;
+		-psp) # PSP preset
+			shift
+			path='dev_hdd0/PSPISO'
+			size='106x180'
+			;;
+		-*)
+			echo "Error: invalid option."
+			exit 1
+			;;
+	esac
+done
+
+# check if base.png exists in $spath
+if [ ! -f "$spath/base.png" ]; then
+    echo "Error: base.png not found."
+    exit 1
+fi
+# check if path is set (don't require path if -noftp is used)
+if [ -z "$path" ] && [ $noftp == "false" ]; then
+	echo "Error: FTP path not set."
+	exit 1
+fi
+# check if size is set
+if [ -z "$size" ]; then
+	echo "Error: cover size not set."
+	exit 1
+fi
+# check if input file exists
+if [ ! -f "$1" ]; then
+    echo "Error: input image not found."
+    exit 1
+fi
+#assign input file
+input="$1"
+shift
+# concatenate the rest of the inputs, separated by spaces
+IFS=' '
+output="$*.png"
+
+# check for required dependencies
+which convert &> /dev/null || { echo "Error: ImageMagick convert not found"; exit 1; }
+which toc2cue &> /dev/null || { echo "Error: ImageMagick composite not found"; exit 1; }
+
+# generate image using ImageMagick convert, composite, input and base.png (194x194, transparent)
+convert "$input" -resize "$size"! png:- | composite -gravity center - "$spath/base.png" "$output"
+# check if creation was successful (output file exists)
+if [ -f "$output" ]; then
+    echo "Done! $output created."
+else
+	echo "Error: unable to create cover."
+	exit 1
+fi
+
+# exit if -noftp option was given
+if $noftp ; then
+	exit 0
+fi
+
+which ftp-upload &> /dev/null || { echo "Error: ftp-upload not found."; exit 1; }
+
+stat=`ftp-upload -h $host -u $user --password $pass --passive --ignore-quit-failure -d $path "$output" 2>&1`
+# check if upload was successful (no errors)
+if [ -z "$stat" ]; then
+	echo "Cover uploaded to $path."
+	exit 0
+else
+	echo "Error: ${stat:12}."
+	exit 1
+fi
